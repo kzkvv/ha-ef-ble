@@ -27,7 +27,7 @@ def build() -> None:
                 "dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
                 "source": "https://github.com/kzkvv/ha-ef-ble",
                 "modified": {
-                    "eflib/connection.py": "Close BLE clients after remote drops; preserve cleanup through cancellation",
+                    "eflib/connection.py": "Close BLE transports after drops, timeout, or error; preserve cleanup through cancellation",
                     "manifest.json": "Identify fork release",
                 },
             },

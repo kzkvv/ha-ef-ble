@@ -4,6 +4,7 @@ import functools
 import hashlib
 import logging
 import struct
+import sys
 import time
 import traceback
 from collections import deque
@@ -601,7 +602,7 @@ class Connection:
         ):
             # Keep cleanup outside `_tasks`: unload cancels that set before waiting.
             self._disconnect_task = asyncio.create_task(
-                self._close_client(self._client)
+                self._close_client(self._client, caller_chain())
             )
         return self._disconnect_task
 
@@ -610,8 +611,7 @@ class Connection:
             # The BLE callback can cancel the auth task awaiting this cleanup.
             await asyncio.shield(task)
 
-    async def _close_client(self, client: BleakClient) -> None:
-        trigger = caller_chain()
+    async def _close_client(self, client: BleakClient, trigger: str) -> None:
         self._logger.debug("Disconnecting BLE client (%s)", trigger)
         outcome = "ok"
         try:
@@ -638,11 +638,37 @@ class Connection:
                 trigger,
             )
         finally:
+            self._close_bluez_transport(client)
             if self._client is client:
                 self._client = None
         self._disconnect_log.append(
             {"time": time.time(), "trigger": trigger, "outcome": outcome}
         )
+
+    @staticmethod
+    def _close_bluez_transport(client: BleakClient) -> None:
+        if sys.platform != "linux":
+            return
+
+        from bleak.backends.bluezdbus.client import (  # noqa: PLC0415 - Linux only
+            BleakClientBlueZDBus,
+        )
+
+        backend = client._backend
+        if not isinstance(backend, BleakClientBlueZDBus) or backend._bus is None:
+            return
+
+        # Bleak 3.0.2 skips bus cleanup when disconnect raises or is cancelled.
+        # No public force-close API exists; retire only this client's BlueZ resources.
+        backend._is_connected = False
+        if backend._disconnect_monitor_event is not None:
+            backend._disconnect_monitor_event.set()
+            backend._disconnect_monitor_event = None
+        backend._cleanup_all()
+        backend._bus.disconnect()
+        backend._bus = None
+        if backend._disconnected_callback is not None:
+            backend._disconnected_callback()
 
     async def wait_connected(self, timeout: int = 20):
         """Will release when connection is happened and authenticated"""
@@ -1105,7 +1131,7 @@ class Connection:
         self._logger.error("Data path stopped: %r", error)
         self._inbox = None
         self._set_state(ConnectionState.ERROR_UNKNOWN, error)
-        # Nothing reads the inbox now, and `_disconnect_client` is a no-op once gone
+        # Nothing reads the inbox now; a missing link still needs disconnect handling.
         if self.is_connected:
             self._add_task(self._disconnect_client())
         else:

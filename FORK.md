@@ -1,7 +1,7 @@
 # EcoFlow BLE socket cleanup build
 
 Fork of [rabits/ha-ef-ble](https://github.com/rabits/ha-ef-ble).
-Preview version `1.1.3b1` adds cleanup for Bluetooth clients whose radio link already dropped.
+Preview version `1.1.3b2` closes Bluetooth transports after remote drops and disconnect timeouts.
 Base: upstream `89fa21c`, containing 1.1.2 plus upstream PowerStream and Wave 3 fixes.
 
 ## Fix
@@ -13,6 +13,9 @@ Repeated drops could exhaust D-Bus connection limits and prevent telemetry from 
 Cleanup now retains the old client, calls its public `disconnect()` method, and finishes before
 another connection starts. Cleanup survives auth cancellation and integration unload. Late callbacks
 from an old client cannot clear a newer connection. Existing five-second disconnect timeout remains.
+If BlueZ disconnect times out or raises, fallback closes that client's D-Bus connection and retires
+its watcher and monitor. Other Bluetooth backends keep their existing disconnect behavior.
+Fallback uses private Bleak BlueZ fields because Bleak 3.0.2 has no public force-close API.
 
 ## Install release
 
@@ -24,7 +27,7 @@ Archive contains `custom_components/ef_ble/`, including source revision and lice
 2. Verify downloaded archive: `sha256sum -c SHA256SUMS`.
 3. Stop Home Assistant. Move existing `ef_ble` directory into the backup location.
 4. Extract archive into Home Assistant's configuration directory, preserving file ownership.
-5. Start Home Assistant and confirm integration version `1.1.3b1` and returning telemetry.
+5. Start Home Assistant and confirm integration version `1.1.3b2` and returning telemetry.
 
 Existing integration entries and entity IDs stay in Home Assistant configuration. Keep those entries;
 replace only component files. Loading changed Python code needs one restart. Recurring restarts
@@ -49,9 +52,13 @@ python scripts/build_release.py
 
 Linux tests use a private `dbus-daemon`, real Bleak 3.0.2, and real D-Bus sockets. Radio drops are
 simulated; 100 drops must leave zero additional open file descriptors. Other regression tests cover
-reconnect ordering, unload, timeout, cancellation, and late callbacks. No physical Bluetooth device
-or running Home Assistant is required. Live device recovery still needs validation after installation.
+reconnect ordering, unload, timeout, transport errors, cancellation, and late callbacks.
+No physical Bluetooth device or running Home Assistant is required for these tests.
+Verify live device recovery after installation; release notes record hardware validation.
 
 Build outputs: `dist/ef_ble.zip` and `dist/SHA256SUMS`. PR workflow also uploads these artifacts.
 `FORK_BUILD.json` records source revision and whether tracked files differed during packaging.
 Publish builds from a clean checkout; local builds with uncommitted changes are marked `dirty`.
+
+Upstream candidate: `codex/fix-ble-disconnect-cleanup`, with production cleanup and tests only.
+This branch retains fork packaging and preview versioning.
