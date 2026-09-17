@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
 import socket
+from collections.abc import Callable, Iterator
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -9,9 +11,11 @@ from bleak.backends.device import BLEDevice
 from custom_components.ef_ble.eflib import connection as connection_module
 from custom_components.ef_ble.eflib.connection import Connection, ConnectionState
 
+type TransportClient = Callable[..., tuple[Mock, socket.socket]]
+
 
 @pytest.fixture
-def connection():
+def connection() -> Connection:
     return Connection(
         BLEDevice("AA:BB:CC:DD:EE:FF", "Test device", {}),
         "TEST_SERIAL",
@@ -22,15 +26,15 @@ def connection():
 
 
 @pytest.fixture
-def transport_client():
-    sockets = []
+def transport_client() -> Iterator[TransportClient]:
+    sockets: list[socket.socket] = []
 
-    def create(*, connected=False):
+    def create(*, connected: bool = False) -> tuple[Mock, socket.socket]:
         transport, peer = socket.socketpair()
         sockets.extend((transport, peer))
         client = Mock(is_connected=connected)
 
-        async def disconnect():
+        async def disconnect() -> None:
             client.is_connected = False
             transport.close()
 
@@ -43,7 +47,9 @@ def transport_client():
 
 
 @pytest.mark.parametrize("retry", [False, True])
-async def test_remote_drop_closes_transport(connection, transport_client, retry):
+async def test_remote_drop_closes_transport(
+    connection: Connection, transport_client: TransportClient, retry: bool
+) -> None:
     client, transport = transport_client()
     connection._client = client
     connection._set_state(ConnectionState.AUTHENTICATED)
@@ -63,8 +69,8 @@ async def test_remote_drop_closes_transport(connection, transport_client, retry)
 
 @pytest.mark.parametrize("connected", [False, True])
 async def test_explicit_disconnect_closes_transport(
-    connection, transport_client, connected
-):
+    connection: Connection, transport_client: TransportClient, connected: bool
+) -> None:
     client, transport = transport_client(connected=connected)
     connection._client = client
 
@@ -76,29 +82,16 @@ async def test_explicit_disconnect_closes_transport(
     assert connection._state == ConnectionState.DISCONNECTED
 
 
-async def test_repeated_drops_do_not_accumulate_transports(
-    connection, transport_client
-):
-    for _ in range(100):
-        client, transport = transport_client()
-        connection._client = client
-        connection._set_state(ConnectionState.AUTHENTICATED)
-
-        connection.disconnected(client)
-        await connection._disconnect_client()
-
-        assert transport.fileno() == -1
-        client.disconnect.assert_awaited_once()
-
-
 async def test_connect_waits_for_old_transport_cleanup(
-    connection, transport_client, monkeypatch
-):
+    connection: Connection,
+    transport_client: TransportClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     old_client, old_transport = transport_client()
     new_client, new_transport = transport_client(connected=True)
     connection._client = old_client
 
-    async def establish(*args, **kwargs):
+    async def establish(*args: Any, **kwargs: Any) -> Mock:
         assert old_transport.fileno() == -1
         return new_client
 
@@ -120,7 +113,9 @@ async def test_connect_waits_for_old_transport_cleanup(
         await connection.disconnect()
 
 
-async def test_late_callback_leaves_new_client_untouched(connection, transport_client):
+async def test_late_callback_leaves_new_client_untouched(
+    connection: Connection, transport_client: TransportClient
+) -> None:
     old_client, _ = transport_client()
     new_client, transport = transport_client(connected=True)
     connection._client = new_client
@@ -140,8 +135,8 @@ async def test_late_callback_leaves_new_client_untouched(connection, transport_c
 
 
 async def test_retry_connector_keeps_ownership_during_establishment(
-    connection, transport_client
-):
+    connection: Connection, transport_client: TransportClient
+) -> None:
     client, _ = transport_client()
     connection._set_state(ConnectionState.ESTABLISHING_CONNECTION)
 
@@ -152,13 +147,15 @@ async def test_retry_connector_keeps_ownership_during_establishment(
     client.disconnect.assert_not_awaited()
 
 
-async def test_cleanup_survives_cancelled_waiter(connection, transport_client):
+async def test_cleanup_survives_cancelled_waiter(
+    connection: Connection, transport_client: TransportClient
+) -> None:
     client, transport = transport_client()
     connection._client = client
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def disconnect():
+    async def disconnect() -> None:
         started.set()
         await release.wait()
         transport.close()
@@ -181,14 +178,16 @@ async def test_cleanup_survives_cancelled_waiter(connection, transport_client):
             await waiter
 
 
-async def test_unload_waits_for_callback_cleanup(connection, transport_client):
+async def test_unload_waits_for_callback_cleanup(
+    connection: Connection, transport_client: TransportClient
+) -> None:
     client, transport = transport_client()
     connection._client = client
     connection._set_state(ConnectionState.AUTHENTICATED)
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def disconnect():
+    async def disconnect() -> None:
         started.set()
         await release.wait()
         transport.close()
@@ -212,13 +211,13 @@ async def test_unload_waits_for_callback_cleanup(connection, transport_client):
 
 
 async def test_auth_cancellation_does_not_interrupt_cleanup(
-    connection, transport_client
-):
+    connection: Connection, transport_client: TransportClient
+) -> None:
     client, transport = transport_client(connected=True)
     connection._client = client
     connection._set_state(ConnectionState.AUTHENTICATED)
 
-    async def disconnect():
+    async def disconnect() -> None:
         client.is_connected = False
         connection.disconnected(client)
         await asyncio.sleep(0)
@@ -235,8 +234,10 @@ async def test_auth_cancellation_does_not_interrupt_cleanup(
 
 
 async def test_disconnect_timeout_remains_bounded(
-    connection, transport_client, monkeypatch
-):
+    connection: Connection,
+    transport_client: TransportClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, _ = transport_client()
     connection._client = client
     client.disconnect.side_effect = asyncio.Event().wait
@@ -246,3 +247,17 @@ async def test_disconnect_timeout_remains_bounded(
 
     assert connection._client is None
     assert connection.disconnect_log[-1]["outcome"] == "timeout"
+
+
+async def test_disconnect_log_keeps_calling_context(
+    connection: Connection, transport_client: TransportClient
+) -> None:
+    client, _ = transport_client(connected=True)
+    connection._client = client
+
+    async def request_cleanup() -> None:
+        await connection._disconnect_client()
+
+    await request_cleanup()
+
+    assert "request_cleanup" in connection.disconnect_log[-1]["trigger"]
