@@ -4,6 +4,8 @@
 
 **Unofficial Bluetooth LE Integration for Home Assistant**
 
+Fork preview: [socket cleanup build and installation](FORK.md).
+
 [![HACS](https://img.shields.io/badge/HACS-Default-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
 [![hassfest](https://img.shields.io/github/actions/workflow/status/rabits/ha-ef-ble/validate-hassfest.yaml?style=for-the-badge&label=hassfest)](https://github.com/rabits/ha-ef-ble/actions/workflows/validate-hassfest.yaml)
 [![HACS Validation](https://img.shields.io/github/actions/workflow/status/rabits/ha-ef-ble/validate-hacs.yaml?style=for-the-badge&label=HACS)](https://github.com/rabits/ha-ef-ble/actions/workflows/validate-hacs.yaml)
